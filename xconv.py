@@ -69,13 +69,22 @@ class XConv(torch.nn.Module):
         - **output:**
           node features :math:`(|\mathcal{V}|, F_{out})`
     """
-    def __init__(self, in_channels: int, out_channels: int, dim: int,
-                 kernel_size: int, hidden_channels: Optional[int] = None,
-                 dilation: int = 1, bias: bool = True, num_workers: int = 1):
+
+    def __init__(
+        self,
+        in_channels: int,
+        out_channels: int,
+        dim: int,
+        kernel_size: int,
+        hidden_channels: Optional[int] = None,
+        dilation: int = 1,
+        bias: bool = True,
+        num_workers: int = 1,
+    ):
         super().__init__()
 
         if knn_graph is None:
-            raise ImportError('`XConv` requires `torch-cluster`.')
+            raise ImportError("`XConv` requires `torch-cluster`.")
 
         self.in_channels = in_channels
         if hidden_channels is None:
@@ -102,16 +111,16 @@ class XConv(torch.nn.Module):
         )
 
         self.mlp2 = S(
-            L(D * K, K**2),
+            L(D * K, K ** 2),
             ELU(),
-            BN(K**2),
+            BN(K ** 2),
             Reshape(-1, K, K),
-            Conv1d(K, K**2, K, groups=K),
+            Conv1d(K, K ** 2, K, groups=K),
             ELU(),
-            BN(K**2),
+            BN(K ** 2),
             Reshape(-1, K, K),
-            Conv1d(K, K**2, K, groups=K),
-            BN(K**2),
+            Conv1d(K, K ** 2, K, groups=K),
+            BN(K ** 2),
             Reshape(-1, K, K),
         )
 
@@ -136,12 +145,17 @@ class XConv(torch.nn.Module):
         pos = pos.unsqueeze(-1) if pos.dim() == 1 else pos
         (N, D), K = pos.size(), self.kernel_size
 
-        edge_index = knn_graph(pos, K * self.dilation, batch, loop=True,
-                               flow='target_to_source',
-                               num_workers=self.num_workers)
+        edge_index = knn_graph(
+            pos,
+            K * self.dilation,
+            batch,
+            loop=True,
+            flow="target_to_source",
+            num_workers=self.num_workers,
+        )
 
         if self.dilation > 1:
-            edge_index = edge_index[:, ::self.dilation]
+            edge_index = edge_index[:, :: self.dilation]
 
         row, col = edge_index[0], edge_index[1]
 
@@ -163,5 +177,4 @@ class XConv(torch.nn.Module):
         return out
 
     def __repr__(self) -> str:
-        return (f'{self.__class__.__name__}({self.in_channels}, '
-                f'{self.out_channels})')
+        return f"{self.__class__.__name__}({self.in_channels}, " f"{self.out_channels})"
