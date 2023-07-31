@@ -6,12 +6,22 @@ import pytorch_lightning as pl
 from pytorch_lightning.loggers import WandbLogger
 
 from model import PointCNN
+
+import argparse
+
+import os
+import sys
+
+sys.path.insert(1, os.path.join(sys.path[0], ".."))
 from ribseg_dataset import RibSegDataset
 
 
 class LightningPointCNN(pl.LightningModule):
-    def __init__(self, num_classes):
+    def __init__(self, num_classes, binary):
         super().__init__()
+        self.binary = binary
+        if self.binary:
+            num_classes = 2
         self.model = PointCNN(num_classes)
 
     def forward(self, x):
@@ -35,6 +45,8 @@ class LightningPointCNN(pl.LightningModule):
 
     def training_step(self, train_batch, batch_idx):
         x, y = train_batch
+        if self.binary:
+            y = (y > 0).to(y.dtype)
         out = self(x)
         loss = F.nll_loss(out, y.flatten())
         self.log("train_loss", loss)
@@ -42,28 +54,51 @@ class LightningPointCNN(pl.LightningModule):
 
     def validation_step(self, val_batch, batch_idx):
         x, y = val_batch
+        if self.binary:
+            y = (y > 0).to(y.dtype)
         out = self(x)
         loss = F.nll_loss(out, y.flatten())
         self.log("val_loss", loss)
 
 
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--binary", action="store_true", help="Use binary classification"
+    )
+    parser.add_argument("--dataset_path", type=str, default="", metavar="N")
+    parser.add_argument("--binary_dataset_path", type=str, default="", metavar="N")
+
+    args = parser.parse_args()
+
     # num_devices = 1
     num_devices = 4
     # data
     npoints = 2048
     # npoints = 8096
-    batch_size = 16
+    batch_size = 32
+    # batch_size = 16
 
     max_epochs = 200
     # batch_size = 48
 
-    config = {"npoints": npoints, "batch_size": batch_size, "max_epochs": max_epochs}
+    config = {
+        "npoints": npoints,
+        "batch_size": batch_size,
+        "max_epochs": max_epochs,
+        "binary": args.binary,
+    }
     train_dataset = RibSegDataset(
-        root="../ribseg_benchmark", npoints=npoints, split="train"
+        root=args.dataset_path,
+        npoints=npoints,
+        split="train",
+        binary_root=args.binary_dataset_path,
     )
     val_dataset = RibSegDataset(
-        root="../ribseg_benchmark", npoints=npoints, split="val"
+        root=args.dataset_path,
+        npoints=npoints,
+        split="val",
+        binary_root=args.binary_dataset_path,
     )
 
     train_loader = DataLoader(
@@ -72,7 +107,7 @@ def main():
         batch_size=batch_size,
         shuffle=True,
         drop_last=True,
-        pin_memory=True,
+        # pin_memory=True,
     )
     val_loader = DataLoader(
         val_dataset,
@@ -80,22 +115,37 @@ def main():
         batch_size=batch_size,
         shuffle=True,
         drop_last=False,
-        pin_memory=True,
+        # pin_memory=True,
     )
 
     # model
-    model = LightningPointCNN(num_classes=25)
+    model = LightningPointCNN(num_classes=25, binary=args.binary)
 
     # training
     wandb_logger = WandbLogger()
+    wandb_logger.log_hyperparams(config)
+
     trainer = pl.Trainer(
-        devices=num_devices,
-        accelerator="gpu",
+        # devices=num_devices,
+        # accelerator="gpu",
         max_epochs=max_epochs,
-        precision="bf16",
+        precision="bf16-mixed",
         logger=wandb_logger,
         log_every_n_steps=1,
     )
+
+    print(
+        f"Trainer initialized: device={trainer.device_ids} strategy={trainer.strategy} "
+    )
+    print(f"trainer.world_size={trainer.world_size}")
+    print(
+        f"trainer.strategy.cluster_environment.world_size()={trainer.strategy.cluster_environment.world_size()}"
+    )
+    print(
+        f"trainer.strategy._accelerator.auto_device_count={trainer.strategy._accelerator.auto_device_count()}"
+    )
+    print(f"trainer.strategy.world_size={trainer.strategy.world_size}")
+
     # trainer = pl.Trainer(gpus=4, num_nodes=1) # precision=16)
     trainer.fit(model, train_loader, val_loader)
 
